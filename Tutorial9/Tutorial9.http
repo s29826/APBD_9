@@ -1,6 +1,0 @@
-@Tutorial9_HostAddress = http://localhost:5027
-
-GET {{Tutorial9_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
