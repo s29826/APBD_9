@@ -2,10 +2,10 @@
 
 namespace Task9.Models;
 
-public class Warehouse
+public class Product
 {
     [Required]
-    public int IdWarehouse { get; set; }
+    public int IdProduct { get; set; }
     
     [Required]
     [MaxLength(200)]
@@ -13,6 +13,9 @@ public class Warehouse
     
     [Required]
     [MaxLength(200)]
-    public string Adress { get; set; }
+    public string Description { get; set; }
+    
+    [Required]
+    public double Price { get; set; }
     
 }
