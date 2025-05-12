@@ -1,9 +1,9 @@
-﻿namespace Task9.Services;
+﻿using Task9.Models.DTOs;
+
+namespace Task9.Services;
 
 public interface IWarehouseService
 {
-    Task<bool> DoesProductExist(int idProduct);
-    Task<bool> DoesWarehouseExist(int idWarehouse);
-    Task<bool> CanAddToOrder(int idProduct, int amount);
-    Task<bool> IsItDone(int idOrder);
+    Task<int> AddProduct(ProductDTO productDto);
+    Task<int> AddProductProcedure(ProductDTO productDto);
 }
