@@ -6,7 +6,11 @@ namespace Task9.Services;
 
 public class WarehouseService : IWarehouseService
 {
-    private readonly string _connectionString = "Data Source=db-mssql;Initial Catalog=2019SBD;Integrated Security=True;Trust Server Certificate=True";
+    private readonly IConfiguration _configuration;
+    public WarehouseService(IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
 
     public async Task<int> AddProduct(ProductDTO productDto)
     {
@@ -15,7 +19,7 @@ public class WarehouseService : IWarehouseService
             return -5;
         }
 
-        await using var conn = new SqlConnection(_connectionString);
+        await using var conn = new SqlConnection(_configuration.GetConnectionString("Default"));
         await conn.OpenAsync();
         await using var tran = (SqlTransaction) await conn.BeginTransactionAsync();
 
@@ -27,7 +31,7 @@ public class WarehouseService : IWarehouseService
             if (!await DoesWarehouseExist(productDto.IdWarehouse, conn, tran))
                 return -2;
 
-            if (!await CanAddToOrder(productDto.IdProduct, productDto.Amount, conn, tran))
+            if (!await CanAddToOrder(productDto.IdProduct, productDto.Amount, productDto.CreatedAt, conn, tran))
                 return -3;
 
             int idOrder = await FindIdOrder(productDto, conn, tran);
@@ -38,10 +42,10 @@ public class WarehouseService : IWarehouseService
             await UpdateOrderFullilledAt(idOrder, conn, tran);
 
             
-            Decimal price = await GetProductPrice(productDto.IdProduct, conn, tran);
+            Decimal price = await GetProductPrice(productDto.IdProduct, conn, tran) * productDto.Amount;
 
             string sql = "INSERT INTO Product_Warehouse (IdWarehouse, IdProduct, IdOrder, Amount, Price, CreatedAt)\n" +
-                         "OUTPUT inserted.IdProduct\n" +
+                         "OUTPUT inserted.IdProductWarehouse\n" +
                          "VALUES (@idWarehouse, @idProduct, @idOrder, @amount, @price, getdate())";
 
             await using (var cmd = new SqlCommand(sql, conn, tran))
@@ -54,20 +58,22 @@ public class WarehouseService : IWarehouseService
 
                 var newId = await cmd.ExecuteScalarAsync();
                 await tran.CommitAsync();
+                
+                
                 return Convert.ToInt32(newId);
             }
         }
         catch (SqlException)
         {
             await tran.RollbackAsync();
-            return -100;
+            return -5;
 
         }
     }
 
     public async Task<int> AddProductProcedure(ProductDTO productDto)
     {
-        await using SqlConnection conn = new SqlConnection(_connectionString);
+        await using SqlConnection conn = new SqlConnection(_configuration.GetConnectionString("Default"));
         await using SqlCommand cmd = new SqlCommand();
 
         cmd.Connection = conn;
@@ -87,7 +93,7 @@ public class WarehouseService : IWarehouseService
         return Convert.ToInt32(output);
     }
 
-    public async Task<bool> DoesProductExist(int idProduct, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<bool> DoesProductExist(int idProduct, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT COUNT(*)\n" +
                      "FROM Product\n" +
@@ -103,7 +109,7 @@ public class WarehouseService : IWarehouseService
         return Convert.ToInt32(result) > 0;
     }
 
-    public async Task<bool> DoesWarehouseExist(int idWarehouse, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<bool> DoesWarehouseExist(int idWarehouse, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT COUNT(*)\n" +
                      "FROM Warehouse\n" +
@@ -119,16 +125,17 @@ public class WarehouseService : IWarehouseService
         return Convert.ToInt32(result) > 0;
     }
 
-    public async Task<bool> CanAddToOrder(int idProduct, int amount, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<bool> CanAddToOrder(int idProduct, int amount, DateTime dateTime, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT COUNT(*)\n" +
                      "FROM [Order]\n" +
-                     "WHERE IdProduct = @idProduct AND Amount >= @amount";
+                     "WHERE IdProduct = @idProduct AND Amount >= @amount AND CreatedAt < @createdAt";
         
         await using SqlCommand cmd = new SqlCommand(sql, sqlConnection, sqlTransaction);
 
         cmd.Parameters.AddWithValue("@idProduct", idProduct);
         cmd.Parameters.AddWithValue("@amount", amount);
+        cmd.Parameters.AddWithValue("@createdAt", dateTime);
 
         var result = await cmd.ExecuteScalarAsync();
         
@@ -136,7 +143,7 @@ public class WarehouseService : IWarehouseService
         return Convert.ToInt32(result) > 0;
     }
 
-    public async Task<bool> AlreadyDone(int idOrder, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<bool> AlreadyDone(int idOrder, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT COUNT(*)\n" +
                      "FROM Product_Warehouse\n" +
@@ -152,21 +159,22 @@ public class WarehouseService : IWarehouseService
         return Convert.ToInt32(result) > 0;
     }
 
-    public async Task<int> FindIdOrder(ProductDTO productDto, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<int> FindIdOrder(ProductDTO productDto, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT IdOrder\n" +
                      "FROM [Order]\n" +
-                     "WHERE IdProduct = @IdProduct";
+                     "WHERE IdProduct = @IdProduct AND Amount = @amount";
         
         await using SqlCommand cmd = new SqlCommand(sql, sqlConnection, sqlTransaction);
 
         cmd.Parameters.AddWithValue("@idProduct", productDto.IdProduct);
+        cmd.Parameters.AddWithValue("@amount", productDto.Amount);
 
 
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
-    public async Task<int> UpdateOrderFullilledAt(int idOrder, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task UpdateOrderFullilledAt(int idOrder, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "UPDATE [Order]\n" +
                      "SET FulfilledAt = getdate()\n" +
@@ -177,10 +185,10 @@ public class WarehouseService : IWarehouseService
         cmd.Parameters.AddWithValue("@idOrder", idOrder);
 
         
-        return await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task<Decimal> GetProductPrice(int idProduct, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
+    private async Task<Decimal> GetProductPrice(int idProduct, SqlConnection sqlConnection, SqlTransaction sqlTransaction)
     {
         string sql = "SELECT Price\n" +
                      "FROM Product\n" +
